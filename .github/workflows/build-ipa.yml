@@ -1,0 +1,46 @@
+name: Build HGTV IPA
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "HGTV 分支"
+        default: "tv-viewPager2"
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: pan8664716/HGTV
+          ref: ${{ inputs.ref }}
+          path: hgtv
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - working-directory: hgtv/ios
+        run: python3 tools/gen_project.py
+      - name: Build
+        working-directory: hgtv/ios
+        run: |
+          xcodebuild -project HGTV.xcodeproj -target HGTV -sdk iphoneos -configuration Release SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || (grep -E "error:" build.log | head -50; exit 1)
+      - name: Pack
+        id: pack
+        working-directory: hgtv/ios
+        run: |
+          VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/Release-iphoneos/HGTV.app/Info.plist)
+          SHA=$(git -C .. rev-parse --short HEAD)
+          NAME="HGTV-iOS_${VER}_${SHA}-unsigned.ipa"
+          mkdir Payload && cp -R build/Release-iphoneos/HGTV.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/$NAME" Payload
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=ios-${VER}-${SHA}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: hgtv/ios/build.log
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.pack.outputs.tag }}" "${{ steps.pack.outputs.name }}" --repo "$GITHUB_REPOSITORY" --title "${{ steps.pack.outputs.tag }}" --notes "未簽名 IPA"
