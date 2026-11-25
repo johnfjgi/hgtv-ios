@@ -19,6 +19,16 @@ jobs:
           ref: ${{ inputs.ref }}
           path: hgtv
       - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - name: Patch
+        working-directory: hgtv/ios/HGTV
+        run: |
+          set -e
+          perl -pi -e 's#landpage/v/"#landpage/v:version/"#' Core/API/ContentRepository.swift
+          perl -pi -e 's#(categoryHost \+ categoryPath, params: )appValues\(\)#${1}values(versionCode: "73532", versionName: "7.3.5.32")#' Core/API/ContentRepository.swift
+          perl -pi -e 's#"推荐加载失败，下拉重试"#"推荐加载失败：\\(error)"#' Features/Recommend/FeedStore.swift
+          perl -pi -e 's#"分类加载失败，下拉重试"#"分类加载失败：\\(error)"#' Features/Category/CategoryPage.swift
+          grep -n 'landpage\|73532' Core/API/ContentRepository.swift
+          grep -rn '加载失败：' Features
       - working-directory: hgtv/ios
         run: python3 tools/gen_project.py
       - name: Build
@@ -31,11 +41,11 @@ jobs:
         run: |
           VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/Release-iphoneos/HGTV.app/Info.plist)
           SHA=$(git -C .. rev-parse --short HEAD)
-          NAME="HGTV-iOS_${VER}_${SHA}-unsigned.ipa"
+          NAME="HGTV-iOS_${VER}_${SHA}_r${GITHUB_RUN_NUMBER}-unsigned.ipa"
           mkdir Payload && cp -R build/Release-iphoneos/HGTV.app Payload/
           zip -qry "$GITHUB_WORKSPACE/$NAME" Payload
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "tag=ios-${VER}-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=ios-${VER}-${SHA}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -43,4 +53,4 @@ jobs:
           path: hgtv/ios/build.log
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ steps.pack.outputs.tag }}" "${{ steps.pack.outputs.name }}" --repo "$GITHUB_REPOSITORY" --title "${{ steps.pack.outputs.tag }}" --notes "未簽名 IPA"
+        run: gh release create "${{ steps.pack.outputs.tag }}" "${{ steps.pack.outputs.name }}" --repo "$GITHUB_REPOSITORY" --title "${{ steps.pack.outputs.tag }}" --notes "未簽名 IPA（修正推薦/分類接口）"
